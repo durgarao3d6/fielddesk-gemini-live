@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FieldDesk · Maintenance dispatch</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui,sans-serif;background:#111715;color:#eef4ed;--lime:#d4f884;--muted:#aab9ad;--edge:#36433b}
+*{box-sizing:border-box}body{margin:0}main{max-width:1060px;margin:auto;padding:32px 22px 56px}header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--edge);padding-bottom:18px}strong{color:var(--lime)}small,p{color:var(--muted)}h1{font-size:clamp(2.5rem,7vw,5rem);letter-spacing:-.075em;line-height:1;margin:38px 0 10px}h2{margin:0 0 16px;font-size:1rem}.grid{display:grid;grid-template-columns:1.3fr 1fr;gap:16px;margin-top:28px}section{border:1px solid var(--edge);background:#1a231e;border-radius:18px;padding:22px}.actions{display:flex;gap:8px;flex-wrap:wrap}button{border:1px solid #546458;background:#29382f;color:#f0f6ef;border-radius:9px;padding:10px 14px;font:inherit;cursor:pointer}button.primary{background:var(--lime);color:#16200d;font-weight:700}button:disabled{opacity:.45;cursor:default}#trace{overflow:auto;min-height:190px;max-height:400px;margin-top:18px;padding:12px;background:#121a15;border-radius:10px}#trace p{margin:4px 0 10px;color:#e2eee3;white-space:pre-wrap}article{border-top:1px solid var(--edge);padding:12px 0}article p{margin:5px 0 0}#receipt{margin-top:16px;overflow-wrap:anywhere}details{margin-top:14px}summary{cursor:pointer;color:var(--muted)}details .actions{margin-top:12px}@media(max-width:740px){.grid{grid-template-columns:1fr}}
+</style>
+<main>
+<header><strong>FieldDesk</strong><small>Maintenance dispatch / P-204</small></header>
+<h1>Report a field fault.</h1>
+<p>Speak in Hinglish. Check the pump records and confirm a mechanical inspection by voice.</p>
+<div class="grid">
+<section>
+<h2>Voice session</h2>
+<div class="actions"><button class="primary" id="live">Start Gemini Live</button><button id="demo">Start rehearsal</button><button id="stop" disabled>End session</button></div>
+<p id="status" role="status">Ready</p>
+<small id="latency">Speech end → first audio: —</small>
+<div id="trace" role="log" aria-label="Conversation"></div>
+<details id="controls" hidden><summary>Rehearsal controls</summary><div class="actions"><button data-step="ask">Ask about P-204</button><button data-step="interrupt">Interrupt</button><button data-step="stage">Request inspection</button><button data-step="confirm">Confirm work order</button></div></details>
+</section>
+<section>
+<h2>Source records</h2>
+<div id="sources"><small>Records appear after the asset lookup.</small></div>
+<div id="receipt" role="status"></div>
+</section>
+</div>
+</main>
+<script>
+const el = id => document.getElementById(id);
+let ws, context, stream, playbackAt = 0, voiceAt = 0, firstAudio = true, transcript = {};
+const playing = new Set();
+const micCode = `
+class Capture extends AudioWorkletProcessor {
+  constructor() { super(); this.phase = 0; this.sum = 0; this.count = 0; this.samples = []; }
+  process(inputs) {
+    const input = inputs[0]?.[0];
+    if (!input) return true;
+    for (const sample of input) {
+      this.sum += sample;
+      this.count++;
+      this.phase += 16000;
+      if (this.phase < sampleRate) continue;
+      this.phase -= sampleRate;
+      this.samples.push(Math.max(-32768, Math.min(32767, this.sum / this.count * 32768)));
+      this.sum = 0;
+      this.count = 0;
+      if (this.samples.length === 320) {
+        const buffer = Int16Array.from(this.samples).buffer;
+        this.port.postMessage(buffer, [buffer]);
+        this.samples = [];
+      }
+    }
+    return true;
+  }
+}
+registerProcessor("capture", Capture);
+`;
+function line(label, message, key) {
+  let p = key && transcript[key];
+  if (!p) {
+    p = document.createElement("p");
+    p.textContent = label + " · ";
+    el("trace").append(p);
+    if (key) transcript[key] = p;
+  }
+  p.textContent += message;
+  el("trace").scrollTop = el("trace").scrollHeight;
+}
+function cut() {
+  for (const source of playing) source.stop();
+  playing.clear();
+  playbackAt = 0;
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+}
+function play(data, mime) {
+  const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+  const samples = new Int16Array(bytes.buffer);
+  const rate = Number(/rate=(\d+)/.exec(mime)?.[1] || 24000);
+  const buffer = context.createBuffer(1, samples.length, rate);
+  const channel = buffer.getChannelData(0);
+  for (let i = 0; i < samples.length; i++) channel[i] = samples[i] / 32768;
+  const source = context.createBufferSource();
+  source.buffer = buffer;
+  source.connect(context.destination);
+  playing.add(source);
+  source.onended = () => playing.delete(source);
+  playbackAt = Math.max(playbackAt, context.currentTime);
+  if (firstAudio && voiceAt) {
+    const delay = Math.round(performance.now() - voiceAt + (playbackAt - context.currentTime) * 1000);
+    el("latency").textContent = "Estimated speech end → first audio: " + delay + " ms";
+    firstAudio = false;
+  }
+  source.start(playbackAt);
+  playbackAt += buffer.duration;
+}
+function show(event) {
+  if (event.error) { end(event.error); return; }
+  if (event.ready) el("status").textContent = "Gemini Live · microphone on";
+  if (event.interrupted || event.content?.interrupted) {
+    cut();
+    transcript = {};
+    firstAudio = true;
+    line("Session", "Playback interrupted.");
+  }
+  if (event.sample) {
+    line("Rehearsal", event.sample);
+    if ("speechSynthesis" in window) {
+      const sample = new SpeechSynthesisUtterance(event.sample);
+      sample.lang = "hi-IN";
+      speechSynthesis.speak(sample);
+    }
+  }
+  const content = event.content;
+  if (content?.inputTranscription?.text) line("You", content.inputTranscription.text, "input");
+  if (content?.outputTranscription?.text) line("FieldDesk", content.outputTranscription.text, "output");
+  for (const part of content?.modelTurn?.parts || []) {
+    if (part.inlineData?.mimeType?.startsWith("audio/")) play(part.inlineData.data, part.inlineData.mimeType);
+  }
+  if (content?.turnComplete) { transcript = {}; firstAudio = true; voiceAt = 0; }
+  const result = event.result;
+  if (!result) return;
+  if (result.error) line("Backend", result.error);
+  if (result.records) {
+    el("sources").replaceChildren();
+    if (!result.records.length) el("sources").textContent = "No records found for that asset.";
+    for (const record of result.records) {
+      const item = document.createElement("article");
+      const heading = document.createElement("strong");
+      const excerpt = document.createElement("p");
+      heading.textContent = record.id + " · " + record.title;
+      excerpt.textContent = record.excerpt;
+      item.append(heading, excerpt);
+      el("sources").append(item);
+    }
+  }
+  if (result.pending) el("receipt").textContent = "Pending confirmation · " + result.pending.asset + " · " + result.pending.symptom;
+  if (result.created) el("receipt").textContent = "Saved " + result.id + " · " + result.asset + " · " + result.symptom;
+}
+function end(status = "Session ended") {
+  const previous = ws;
+  ws = null;
+  previous?.close();
+  stream?.getTracks().forEach(track => track.stop());
+  stream = null;
+  cut();
+  context?.close();
+  context = null;
+  el("status").textContent = status;
+  el("live").disabled = el("demo").disabled = false;
+  el("stop").disabled = true;
+  el("controls").hidden = true;
+}
+async function start(rehearse) {
+  el("live").disabled = el("demo").disabled = true;
+  el("status").textContent = "Connecting…";
+  el("trace").replaceChildren();
+  el("receipt").textContent = "";
+  el("sources").textContent = "Records appear after the asset lookup.";
+  el("latency").textContent = rehearse ? "Latency is measured in Live mode." : "Speech end → first audio: —";
+  transcript = {};
+  voiceAt = 0;
+  firstAudio = true;
+  try {
+    if (!rehearse) {
+      context = new AudioContext();
+      await context.resume();
+      stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}});
+      const url = URL.createObjectURL(new Blob([micCode], {type:"text/javascript"}));
+      try { await context.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+    }
+    const socket = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + (rehearse ? "/rehearse" : "/live"));
+    ws = socket;
+    let connected = rehearse;
+    socket.onmessage = ({data}) => {
+      if (ws !== socket) return;
+      const event = JSON.parse(data);
+      if (event.ready) connected = true;
+      show(event);
+    };
+    socket.onclose = () => { if (ws === socket) end("Connection closed."); };
+    socket.onerror = () => { if (ws === socket) end("Connection failed."); };
+    el("stop").disabled = false;
+    socket.onopen = () => {
+      if (ws !== socket) return;
+      if (rehearse) {
+        el("controls").hidden = false;
+        el("controls").open = true;
+        el("status").textContent = "Scripted rehearsal · use the controls below";
+        return;
+      }
+      const capture = new AudioWorkletNode(context, "capture");
+      const mute = context.createGain();
+      mute.gain.value = 0;
+      context.createMediaStreamSource(stream).connect(capture).connect(mute).connect(context.destination);
+      capture.port.onmessage = ({data}) => {
+        if (!connected || ws !== socket || socket.readyState !== WebSocket.OPEN) return;
+        const samples = new Int16Array(data);
+        const power = samples.reduce((energy, sample) => energy + (sample / 32768) ** 2, 0) / samples.length;
+        if (power > 0.00016 && (firstAudio || playing.size)) voiceAt = performance.now();
+        const audio = btoa(String.fromCharCode(...new Uint8Array(data)));
+        socket.send(JSON.stringify({audio}));
+      };
+    };
+  } catch (error) { end(error.message || "Microphone unavailable."); }
+}
+el("live").onclick = () => start(false);
+el("demo").onclick = () => start(true);
+el("stop").onclick = () => end();
+for (const button of document.querySelectorAll("[data-step]")) {
+  button.onclick = () => {
+    if (ws?.readyState !== WebSocket.OPEN) return;
+    el("controls").open = true;
+    ws.send(JSON.stringify({step:button.dataset.step}));
+  };
+}
+</script>

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "DOC-21",
+    "title": "Maintenance manual",
+    "excerpt": "For seal leakage on pump P-204, log a mechanical inspection. Record the asset and symptom in the work order.",
+    "asset": "P-204"
+  },
+  {
+    "id": "TKT-318",
+    "title": "Prior support ticket",
+    "excerpt": "P-204 previously leaked near the seal housing. The mechanical team resolved it. The prior ticket does not diagnose the current leak.",
+    "asset": "P-204"
+  },
+  {
+    "id": "INV-07",
+    "title": "Inventory record",
+    "excerpt": "Two compatible seal kits for P-204 are listed in Store B, bin 07. This record is a demo inventory snapshot.",
+    "asset": "P-204"
+  }
+]
