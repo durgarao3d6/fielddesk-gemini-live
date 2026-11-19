@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FieldDesk · Voice AI engineering course</title>
+<style>
+:root{color-scheme:dark;background:#111715;color:#eef4ed;font:16px/1.55 system-ui,sans-serif;--accent:#d4f884;--muted:#b3c3b7;--border:#435148}
+*{box-sizing:border-box}body{margin:0}main{max-width:1080px;margin:auto;padding:28px 24px 64px}
+a{color:var(--accent)}header{display:flex;justify-content:space-between;gap:18px;border-bottom:1px solid var(--border);padding-bottom:16px}
+h1{font-size:clamp(2.3rem,6vw,4rem);line-height:1.02;letter-spacing:-.045em;margin:34px 0 12px}
+p{margin:8px 0 16px}.muted,small{color:var(--muted)}.layout{display:grid;grid-template-columns:235px minmax(0,1fr);gap:20px;margin-top:26px}
+nav,article{border:1px solid var(--border);border-radius:15px;padding:20px;background:#1a231e}
+nav{align-self:start}nav button{width:100%;text-align:left;margin-top:7px}
+button,input{font:inherit;color:inherit;border:1px solid #657568;background:#25342b;border-radius:8px;padding:8px 10px}
+button{cursor:pointer}button[aria-current="step"]{background:var(--accent);color:#15210f}button:disabled{opacity:.5;cursor:default}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px}h2,h3{line-height:1.2}h2{margin:8px 0 15px}
+fieldset{border:1px solid var(--border);border-radius:10px;margin:20px 0;padding:14px;min-inline-size:0}
+fieldset label{display:block;margin:8px 0}progress{width:100%;accent-color:var(--accent)}code{overflow-wrap:anywhere}
+#feedback{min-height:1.5em;margin:8px 0 0}#next{margin-left:8px}.inputs{display:flex;gap:12px;flex-wrap:wrap}.inputs input{display:block;width:10rem}
+@media(max-width:700px){.layout{grid-template-columns:1fr}}
+</style>
+<main>
+<header><strong>FieldDesk</strong><a href="/">Open dispatch console</a></header>
+<h1>Voice AI Engineering</h1>
+<p class="muted">A hands-on course for working professionals. Six sessions, about 25–35 minutes each. Start with basic Python, JavaScript and HTTP.</p>
+<div class="layout">
+<nav aria-label="Course lessons"><label for="progress" id="progress-label">0 of 6 lessons passed</label><progress id="progress" max="6" value="0"></progress><div id="lessons"></div></nav>
+<article>
+<small id="duration"></small>
+<h2 id="title" tabindex="-1"></h2>
+<p id="concept"></p>
+<h3>Lab</h3>
+<p id="lab"></p>
+<p><small>Code to inspect</small><br><code id="source"></code></p>
+<section id="calculator" hidden>
+<h3>Live audio cost calculator</h3>
+<form id="cost-form">
+<div class="inputs">
+<label>New input seconds<input type="number" min="0" max="36000" value="60" required name="input"></label>
+<label>Output seconds<input type="number" min="0" max="36000" value="60" required name="output"></label>
+<label>Rebilled input seconds<input type="number" min="0" max="36000" value="0" required name="history"></label>
+</div>
+<p><output id="cost" aria-live="polite"></output></p>
+<small>Illustration at 25 tokens/sec and $3 input/$12 output per million audio tokens. Excludes text and taxes. Verify rates before using for a budget. <a href="https://ai.google.dev/gemini-api/docs/pricing#gemini-2.5-flash-native-audio">Google pricing</a></small>
+</form>
+</section>
+<form id="quiz">
+<fieldset><legend id="question"></legend><div id="options"></div><p id="feedback" role="status"></p></fieldset>
+<button type="submit">Check answer</button><button id="next" type="button" disabled>Next lesson</button>
+</form>
+</article>
+</div>
+</main>
+<script>
+const lessons = [
+  {
+    title: "How LLMs handle a conversation", duration: "25 minutes",
+    concept: "A language model generates tokens conditioned on its current context. System instructions shape the response, conversation history supplies state, and a tool call asks your application for information or action. Tool results extend the model’s context. The application owns the side effects.",
+    lab: "Open the dispatch console in another tab. Run Start rehearsal → Ask about P-204 → Request inspection. On paper, label each event as user input, retrieved evidence, model response, or application state. The rehearsal uses scripted responses. Then inspect the live system instruction and tool declarations to see where Gemini participates.",
+    source: "src/fielddesk/adapters/gemini.py",
+    question: "Which component owns the final decision to write a work order?",
+    choices: ["The system instruction", "The dispatch service", "The transcript renderer"], answer: 1,
+    explanation: "The application can verify state and enforce its rules before calling the database."
+  },
+  {
+    title: "Voice models and streaming audio", duration: "35 minutes",
+    concept: "A cascaded voice agent can use speech recognition, a text model and speech synthesis. A native audio model can consume and generate audio directly. FieldDesk sends mono 16 kHz PCM to Gemini Live and queues returned audio for playback. Transcripts help with inspection and confirmation.",
+    lab: "Find AudioWorkletProcessor and the audio WebSocket sender. Calculate the number of bytes in 20 ms of 16 kHz mono int16 PCM before Base64. Run the rehearsal Interrupt button and inspect the displayed event. With a Gemini key, interrupt a live response and record whether queued speech stops.",
+    source: "src/fielddesk/web/index.html · src/fielddesk/adapters/gemini.py",
+    question: "How large is a 20 ms chunk at 16 kHz, mono, 16-bit PCM?",
+    choices: ["320 bytes", "640 bytes", "1,600 bytes"], answer: 1,
+    explanation: "16,000 samples/second × 0.02 seconds × 2 bytes/sample = 640 bytes."
+  },
+  {
+    title: "Retrieval and grounded answers", duration: "30 minutes",
+    concept: "Retrieval gives the model evidence specific to the current request. FieldDesk retrieves records by asset ID. Larger corpora may need keyword search, embeddings or both. Evaluate whether retrieval found the evidence and whether the answer accurately used it.",
+    lab: "Retrieve the P-204 records in rehearsal. Identify which source proves the stock location and which records only describe earlier events. On a practice branch, edit the stock excerpt and restart the app. The record card should update. Compare the card with the scripted rehearsal text, then try a live query if you have a key.",
+    source: "src/fielddesk/fixtures/records.json · src/fielddesk/adapters/knowledge.py",
+    question: "What does the old ticket establish about today’s leak?",
+    choices: ["The current fault has the same cause", "The seal kit must be replaced", "It is historical evidence and cannot establish today’s cause"], answer: 2,
+    explanation: "A previous repair is useful context. The current fault needs its own evidence."
+  },
+  {
+    title: "Tool calling and durable actions", duration: "35 minutes",
+    concept: "Models propose tool calls with structured arguments. FieldDesk checks session state, requires readback and an explicit confirmation transcript, then writes to SQLite. A stable order ID lets the storage adapter handle repeated inserts without duplicate rows.",
+    lab: "Run python -m unittest discover -s tests -v after installation. Trace the test that rejects a negated confirmation. On a practice branch, add a case for confirmation after reconnecting and verify that a fresh session cannot commit the old draft.",
+    source: "src/fielddesk/dispatch.py · tests/test_workflow.py",
+    question: "Which outcome should a fresh session produce when given only a confirmation phrase?",
+    choices: ["Commit the old draft", "Reject the action because the new session has no draft", "Create a replacement inspection"], answer: 1,
+    explanation: "Drafts belong to the connection that staged them. A fresh session must stage its own draft."
+  },
+  {
+    title: "Evaluation, latency and cost", duration: "30 minutes",
+    concept: "Assess quality at the task level. Track grounded answers, false work-order writes, completion rate and time to first audio. Report sample size alongside latency percentiles. Live conversation history and transcription can increase costs.",
+    lab: "Use the calculator to compare a short voice interaction with the same interaction plus 120 seconds of rebilled context. Design ten scripted test cases spanning English, Hinglish, ambiguous assets, interruptions and negation. With a Gemini key, run the set and log live latency as an estimate.",
+    source: "docs/demo-and-evaluation.md · src/fielddesk/web/index.html",
+    question: "What should an attempted write after “don’t confirm work order” count as?",
+    choices: ["A correct citation", "A false action and a failed case", "A latency improvement"], answer: 1,
+    explanation: "An unapproved write fails the action requirement even if the answer was fast or grounded."
+  },
+  {
+    title: "Capstone: add a second asset", duration: "35 minutes plus practice",
+    concept: "A portfolio project should show an engineering decision and evidence that it works. Extend the system while preserving the separation between model proposals, evidence and writes.",
+    lab: "Add a second synthetic asset and route retrieval and staging to it. Store the retrieved asset identity in session state so an order cannot be drafted for a different asset. Submit a pull request description with a diagram, a successful scenario, an unknown-asset case, a mismatched-asset rejection and your evaluation results.",
+    source: "src/fielddesk/dispatch.py · src/fielddesk/fixtures/records.json · tests/test_workflow.py",
+    question: "Which acceptance check best protects this extension?",
+    choices: ["The UI loads", "Gemini mentions both asset IDs", "Staging an order for an asset other than the retrieved one is rejected"], answer: 2,
+    explanation: "This tests the boundary between retrieved evidence and the downstream write."
+  }
+];
+
+const byId = id => document.getElementById(id);
+const storageKey = "fielddesk-course-passed";
+let passed = new Set();
+try {
+  const saved = JSON.parse(localStorage.getItem(storageKey) || "[]");
+  if (Array.isArray(saved)) passed = new Set(saved.filter(index => Number.isInteger(index) && lessons[index]));
+} catch {}
+let current = lessons.findIndex((_, index) => !passed.has(index));
+if (current === -1) current = 0;
+
+function updateProgress() {
+  byId("progress").value = passed.size;
+  byId("progress-label").textContent = passed.size + " of " + lessons.length + " lessons passed";
+  for (const [index, button] of [...byId("lessons").children].entries()) {
+    button.textContent = lessons[index].title + (passed.has(index) ? " ✓" : "");
+  }
+}
+
+function render(focus = false) {
+  const lesson = lessons[current];
+  for (const button of byId("lessons").children) button.removeAttribute("aria-current");
+  byId("lessons").children[current].setAttribute("aria-current", "step");
+  for (const field of ["title", "duration", "concept", "lab", "source", "question"]) {
+    byId(field).textContent = lesson[field];
+  }
+  byId("calculator").hidden = current !== 4;
+  byId("options").replaceChildren(...lesson.choices.map((choice, index) => {
+    const label = document.createElement("label");
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "answer";
+    radio.value = index;
+    radio.required = true;
+    label.append(radio, " " + choice);
+    return label;
+  }));
+  byId("feedback").textContent = passed.has(current) ? "Lesson passed. You can attempt it again." : "";
+  byId("next").hidden = current === lessons.length - 1;
+  byId("next").disabled = !passed.has(current);
+  if (focus) byId("title").focus();
+}
+
+for (const [index, lesson] of lessons.entries()) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = lesson.title;
+  button.onclick = () => { current = index; render(true); };
+  byId("lessons").append(button);
+}
+byId("next").onclick = () => { current++; render(true); };
+byId("quiz").onsubmit = event => {
+  event.preventDefault();
+  const correct = Number(new FormData(event.currentTarget).get("answer")) === lessons[current].answer;
+  byId("feedback").textContent = (correct ? "Correct. " : "Try again. ") + lessons[current].explanation;
+  if (correct) {
+    passed.add(current);
+    try { localStorage.setItem(storageKey, JSON.stringify([...passed])); } catch {}
+    byId("next").disabled = false;
+    updateProgress();
+  }
+};
+const costForm = byId("cost-form");
+function updateCost() {
+  if (!costForm.checkValidity()) {
+    byId("cost").textContent = "Enter valid durations to calculate a cost.";
+    return;
+  }
+  const {input, output, history} = costForm.elements;
+  const dollars = 25 * ((input.valueAsNumber + history.valueAsNumber) * 3 + output.valueAsNumber * 12) / 1000000;
+  byId("cost").textContent = "Estimated audio charge: $" + dollars.toFixed(4);
+}
+costForm.oninput = updateCost;
+costForm.onsubmit = event => event.preventDefault();
+updateCost();
+updateProgress();
+render();
+</script>

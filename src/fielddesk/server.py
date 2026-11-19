@@ -11,7 +11,8 @@ from .dispatch import Session
 from .protocol import emit
 from .rehearsal import rehearsal
 
-PAGE = Path(__file__).resolve().parent / "web" / "index.html"
+WEB = Path(__file__).resolve().parent / "web"
+PAGES = {"/": WEB / "index.html", "/learn": WEB / "learn.html"}
 MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
 KNOWLEDGE = FixtureKnowledge()
 ORDERS = SQLiteOrders(Path(os.getenv("FIELDDESK_DB", "orders.sqlite3")))
@@ -42,8 +43,9 @@ async def serve_page(connection, request):
         if origin not in {"http://"+host, "https://"+host}:
             return connection.respond(403, "Same-origin browser session required.")
         return None
-    if request.path == "/":
-        response = connection.respond(200, PAGE.read_text(encoding="utf-8"))
+    page = PAGES.get(request.path)
+    if page is not None:
+        response = connection.respond(200, page.read_text(encoding="utf-8"))
         response.headers["Content-Type"] = "text/html; charset=utf-8"
         return response
     return connection.respond(404, "Not found")

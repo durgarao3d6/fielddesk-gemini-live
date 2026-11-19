@@ -25,6 +25,12 @@ fielddesk
 
 Choose **Start Gemini Live** and grant microphone access. Set `GEMINI_MODEL` if your account provides a different native-audio Live model. `PORT` defaults to 8765 and `FIELDDESK_DB` defaults to `orders.sqlite3`.
 
+## Learn with FieldDesk
+
+After starting the server, open [Voice AI Engineering](http://localhost:8765/learn) for six guided lessons, exercises, knowledge checks and a capstone. The guide tracks quiz progress in your browser. Rehearsal exercises require no Gemini credentials. Optional live exercises use the configured Gemini key.
+
+Budget 25–35 minutes per lesson, with extra time for the capstone. The [course syllabus](docs/course.md) lists objectives, assessment criteria and documentation for further study.
+
 ## Repository map
 
 | Path | Responsibility |
